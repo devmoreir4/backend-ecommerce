@@ -1,5 +1,6 @@
 const Product = Parse.Object.extend('Product');
 const Category = Parse.Object.extend('Category');
+const CartItem = Parse.Object.extend('CartItem');
 
 // Use Parse.Cloud.define to define as many cloud functions as you want.
 // For example:
@@ -36,19 +37,7 @@ Parse.Cloud.define('get-product-list', async (req) => {
 
 	return resultProducts.map(function (p){
 		p = p.toJSON();
-		return{
-			id: p.objectId,
-			title: p.title,
-			description: p.description,
-			price: p.price,
-			unit: p.unit,
-			picture: p.picture != null ? p.picture.url : null,
-			category: {
-				title: p.category.title,
-				id: p.category.objectId
-			},
-		}
-
+		return formatProduct(p);
 	});
 });
 
@@ -123,6 +112,57 @@ Parse.Cloud.define('reset-password', async (req) => {
 	await Parse.User.requestPasswordReset(req.params.email);
 });
 
+Parse.Cloud.define('add-item-to-cart', async (req) => {
+	if(req.params.quantity == null) throw 'INVALID_QUANTITY';
+	if(req.params.productId == null) throw 'INVALID_PRODUCT';
+
+	const cartItem = new CartItem();
+	cartItem.set('quantity', req.params.quantity);
+
+	const product = new Product();
+	product.id = req.params.productId;
+
+	cartItem.set('product', product);
+	cartItem.set('user', req.user);
+
+	const savedItem = await cartItem.save(null, {useMasterKey: true});
+	return {
+		id: savedItem.id,
+	}
+});
+
+Parse.Cloud.define('modify-item-quantity', async (req) => {
+	if(req.params.cartItemId == null) throw 'INVALID_CART_ITEM';
+	if(req.params.quantity == null) throw 'INVALID_QUANTITY';
+
+	const cartItem = new CartItem();
+	cartItem.id = req.params.cartItemId;
+
+	if(req.params.quantity > 0){
+		cartItem.set('quantity', req.params.quantity);
+		await cartItem.save(null,{useMasterKey: true});
+	}else{
+		await cartItem.destroy({useMasterKey: true});
+	}
+});
+
+Parse.Cloud.define('get-cart-items', async (req) => {
+	const queryCartItems = new Parse.Query(CartItem);
+	queryCartItems.equalTo('user', req.user);
+	queryCartItems.include('product');
+	queryCartItems.include('product.category');
+
+	const resultCartItems = await queryCartItems.find({useMasterKey: true});
+	return resultCartItems.map(function (c) {
+		c = c.toJSON();
+		return{
+			id: c.objectId,
+			quantity: c.quantity,
+			product: formatProduct(c.product)
+		}
+	});
+});
+
 function formatUser(userJson) {
 	return {
 		id: userJson.objectId,
@@ -131,5 +171,20 @@ function formatUser(userJson) {
 		phone: userJson.phone,
 		cpf: userJson.cpf,
 		token: userJson.sessionToken,
+	}
+}
+
+function formatProduct(productJason) {
+	return {
+		id: productJason.objectId,
+		title: productJason.title,
+		description: productJason.description,
+		price: productJason.price,
+		unit: productJason.unit,
+		picture: productJason.picture != null ? productJason.picture.url : null,
+		category: {
+			title: productJason.category.title,
+			id: productJason.category.objectId
+		},
 	}
 }
